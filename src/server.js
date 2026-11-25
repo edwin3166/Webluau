@@ -1,6 +1,5 @@
 require('dotenv').config();
 const express = require('express');
-const cors = require('cors');
 const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
@@ -8,23 +7,144 @@ const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const MASTER_SECRET = process.env.MASTER_SECRET || crypto.randomBytes(32).toString('hex');
 const ALLOWED_EXECUTOR = process.env.ALLOWED_EXECUTOR || 'YourExecutorName';
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || '';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
+const AUTH_SESSION_SECRET = process.env.AUTH_SESSION_SECRET || '';
+const SESSION_COOKIE = 'velum_admin_session';
+const SESSION_TTL_SECONDS = 8 * 60 * 60;
+const secureCookies = process.env.NODE_ENV === 'production';
+const authConfigured = Boolean(
+  ADMIN_USERNAME &&
+  ADMIN_PASSWORD.length >= 12 &&
+  Buffer.byteLength(AUTH_SESSION_SECRET, 'utf8') >= 32
+);
 
 // In-memory store (replace with Redis/DB in production)
 const scripts = new Map();
+const activeSessions = new Map();
 
 // ---------- Middleware ----------
-app.use(cors());
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '2mb' }));
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) res.set('Cache-Control', 'no-store');
+  next();
+});
 app.use(express.static(path.join(__dirname, '../public')));
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: { error: 'Too many requests' }
 });
 app.use('/api/', limiter);
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Try again in 15 minutes.' }
+});
+
+// ---------- Authentication ----------
+function constantTimeEqual(candidate, expected) {
+  const candidateBuffer = Buffer.from(String(candidate ?? ''), 'utf8');
+  const expectedBuffer = Buffer.from(String(expected ?? ''), 'utf8');
+  return candidateBuffer.length === expectedBuffer.length &&
+    crypto.timingSafeEqual(candidateBuffer, expectedBuffer);
+}
+
+function createSessionToken(username) {
+  const now = Math.floor(Date.now() / 1000);
+  for (const [sessionId, expiresAt] of activeSessions) {
+    if (expiresAt <= now) activeSessions.delete(sessionId);
+  }
+  const claims = {
+    sub: username,
+    exp: now + SESSION_TTL_SECONDS,
+    sid: crypto.randomBytes(32).toString('base64url')
+  };
+  activeSessions.set(claims.sid, claims.exp);
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url');
+  const signature = crypto.createHmac('sha256', AUTH_SESSION_SECRET)
+    .update(payload)
+    .digest('base64url');
+  return `${payload}.${signature}`;
+}
+
+function readSessionCookie(req) {
+  const cookies = (req.headers.cookie || '').split(';');
+  for (const cookie of cookies) {
+    const separator = cookie.indexOf('=');
+    if (separator < 0) continue;
+    if (cookie.slice(0, separator).trim() === SESSION_COOKIE) {
+      return cookie.slice(separator + 1).trim();
+    }
+  }
+  return '';
+}
+
+function getVerifiedSession(token) {
+  if (!authConfigured || !token) return null;
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+
+  const expectedSignature = crypto.createHmac('sha256', AUTH_SESSION_SECRET)
+    .update(parts[0])
+    .digest('base64url');
+  if (!constantTimeEqual(parts[1], expectedSignature)) return null;
+
+  try {
+    const claims = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    if (claims.sub !== ADMIN_USERNAME || !Number.isSafeInteger(claims.exp)) return null;
+    if (claims.exp <= Math.floor(Date.now() / 1000)) return null;
+    if (typeof claims.sid !== 'string' || activeSessions.get(claims.sid) !== claims.exp) return null;
+    return claims;
+  } catch {
+    return null;
+  }
+}
+
+function verifySessionToken(token) {
+  return getVerifiedSession(token)?.sub || null;
+}
+
+function setSessionCookie(res, token) {
+  res.cookie(SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: secureCookies,
+    sameSite: 'strict',
+    path: '/',
+    maxAge: SESSION_TTL_SECONDS * 1000
+  });
+}
+
+function clearSessionCookie(res) {
+  res.clearCookie(SESSION_COOKIE, {
+    httpOnly: true,
+    secure: secureCookies,
+    sameSite: 'strict',
+    path: '/'
+  });
+}
+
+function requireAdmin(req, res, next) {
+  if (!authConfigured) {
+    return res.status(503).json({
+      error: 'Admin login is not configured. Set ADMIN_USERNAME, ADMIN_PASSWORD, and AUTH_SESSION_SECRET.'
+    });
+  }
+
+  const username = verifySessionToken(readSessionCookie(req));
+  if (!username) return res.status(401).json({ error: 'Authentication required' });
+  req.adminUsername = username;
+  next();
+}
 
 // ---------- Crypto helpers ----------
 function encrypt(text, keyHex) {
@@ -99,8 +219,42 @@ fn()
 
 // ---------- Routes ----------
 
-// Health
-app.get('/api/status', (req, res) => {
+// Public session check lets the UI show either the login or the admin panel.
+app.get('/api/session', (req, res) => {
+  if (!authConfigured) {
+    return res.json({ authConfigured: false, authenticated: false });
+  }
+  const username = verifySessionToken(readSessionCookie(req));
+  res.json({ authConfigured: true, authenticated: Boolean(username) });
+});
+
+app.post('/api/login', loginLimiter, (req, res) => {
+  if (!authConfigured) {
+    return res.status(503).json({
+      error: 'Admin login is not configured. Set ADMIN_USERNAME, ADMIN_PASSWORD, and AUTH_SESSION_SECRET.'
+    });
+  }
+
+  const { username, password } = req.body || {};
+  const validUsername = constantTimeEqual(username, ADMIN_USERNAME);
+  const validPassword = constantTimeEqual(password, ADMIN_PASSWORD);
+  if (!validUsername || !validPassword) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  setSessionCookie(res, createSessionToken(ADMIN_USERNAME));
+  res.json({ authenticated: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  const session = getVerifiedSession(readSessionCookie(req));
+  if (session) activeSessions.delete(session.sid);
+  clearSessionCookie(res);
+  res.json({ success: true });
+});
+
+// Admin-only health details
+app.get('/api/status', requireAdmin, (req, res) => {
   res.json({
     status: 'ok',
     scripts: scripts.size,
@@ -108,8 +262,8 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// Register a new protected script
-app.post('/api/register', (req, res) => {
+// Admin-only script registration
+app.post('/api/register', requireAdmin, (req, res) => {
   const { name, source, expiresInHours = 720 } = req.body; // default 30 days
 
   if (!source || typeof source !== 'string' || source.trim().length < 5) {
@@ -140,7 +294,7 @@ app.post('/api/register', (req, res) => {
   });
 });
 
-// Load protected script (only succeeds with correct headers)
+// Load endpoint keeps its existing per-script key and executor checks.
 app.get('/api/load/:id', (req, res) => {
   const script = scripts.get(req.params.id);
 
@@ -157,7 +311,6 @@ app.get('/api/load/:id', (req, res) => {
   const providedKey = req.headers['x-script-key'];
 
   if (executor !== ALLOWED_EXECUTOR || providedKey !== script.key) {
-    // Never leak real content
     return res.status(403).json({ error: 'Forbidden' });
   }
 
@@ -171,8 +324,8 @@ app.get('/api/load/:id', (req, res) => {
   }
 });
 
-// List scripts (simple admin view – protect this in production)
-app.get('/api/scripts', (req, res) => {
+// Admin-only list of registered scripts
+app.get('/api/scripts', requireAdmin, (req, res) => {
   const list = [];
   for (const [id, s] of scripts.entries()) {
     list.push({
@@ -187,8 +340,8 @@ app.get('/api/scripts', (req, res) => {
   res.json(list);
 });
 
-// Delete a script
-app.delete('/api/scripts/:id', (req, res) => {
+// Admin-only delete
+app.delete('/api/scripts/:id', requireAdmin, (req, res) => {
   if (scripts.delete(req.params.id)) {
     res.json({ success: true });
   } else {
@@ -203,7 +356,6 @@ app.get('*', (req, res) => {
 
 // ---------- Start ----------
 app.listen(PORT, () => {
-  console.log(`\n  VELUM Protector running on http://localhost:${PORT}`);
-  console.log(`  Allowed executor : ${ALLOWED_EXECUTOR}`);
-  console.log(`  Master secret    : ${MASTER_SECRET.slice(0, 8)}...\n`);
+  console.log(`\n  VELUM Protector running on port ${PORT}`);
+  console.log(`  Admin login configured: ${authConfigured ? 'yes' : 'no'}`);
 });

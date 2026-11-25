@@ -23,6 +23,8 @@ npm install
 cp .env.example .env
 # Edit .env → set ALLOWED_EXECUTOR to the exact name returned by identifyexecutor()
 # Example values: "Fluxus", "Wave", "Valyse", "Solara", etc.
+# Set ADMIN_USERNAME and ADMIN_PASSWORD (12+ characters).
+# Generate AUTH_SESSION_SECRET with: openssl rand -hex 32
 
 # 3. Run
 npm start
@@ -43,21 +45,29 @@ Open http://localhost:3000
 
 ## Environment variables
 
-| Variable          | Description                                      | Default              |
-|-------------------|--------------------------------------------------|----------------------|
-| `PORT`            | Server port                                      | `3000`               |
-| `MASTER_SECRET`   | Used for future signing / admin features         | random               |
-| `ALLOWED_EXECUTOR`| Exact string returned by `identifyexecutor()`    | `YourExecutorName`   |
+| Variable               | Description                                                   |
+|------------------------|---------------------------------------------------------------|
+| `PORT`                 | Server port (Render supplies this in production)              |
+| `ALLOWED_EXECUTOR`     | Exact string returned by `identifyexecutor()`                 |
+| `ADMIN_USERNAME`       | Single administrator username                                |
+| `ADMIN_PASSWORD`       | Administrator password; at least 12 characters                |
+| `AUTH_SESSION_SECRET`  | Random signing secret; at least 32 characters                 |
 
 ## Production notes
 
 - Replace the in-memory `Map` with Redis or a database.
 - Put the service behind Cloudflare / Nginx + HTTPS.
+- In Render, set `ADMIN_USERNAME`, `ADMIN_PASSWORD`, and `AUTH_SESSION_SECRET` in the service's Environment settings; never commit the real values or a `.env` file.
+- The admin session uses an `HttpOnly`, `SameSite=Strict` cookie, marked `Secure` in production, and expires after 8 hours. Rotating `AUTH_SESSION_SECRET` or restarting the service invalidates existing sessions; keep one Render instance because active sessions are held in memory.
 - Change the `API_BASE` URL inside the generated loader to your real domain.
 - Add HWID binding if the executor exposes `gethwid()` or similar.
-- Protect `/api/scripts` and `/api/register` with authentication if the panel is public.
 
 ## API
+
+### `POST /api/login`
+Accepts the configured administrator `username` and `password` and sets a signed session cookie. `POST /api/logout` clears it; `GET /api/session` reports whether the browser has a valid session.
+
+The admin cookie is required for `/api/status`, `/api/register`, `/api/scripts`, and `DELETE /api/scripts/:id`.
 
 ### `POST /api/register`
 ```json
