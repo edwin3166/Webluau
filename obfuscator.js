@@ -1,24 +1,185 @@
 /**
- * Velum Luau Obfuscator - Final
- * Maximum practical protection in pure JavaScript
- * Multi-layer VM • Integrity • Anti-analysis
+ * Velum Luau Obfuscator
+ * Two modes:
+ *  - "standard" : Powerful non-VM obfuscation (smaller & faster)
+ *  - "maximum"  : Full custom VM protection
  */
 
 class LuauObfuscator {
-  constructor() {
-    this.key = this._bytes(40);
-    this.bc = [];
-    this.consts = [];
-    this.map = new Map();
+  constructor(options = {}) {
+    this.mode = options.mode === "maximum" ? "maximum" : "standard";
+    this.key = this._bytes(32);
+    this.varMap = new Map();
+    this.counter = 0;
+    this.reserved = new Set([
+      "and","break","do","else","elseif","end","false","for","function",
+      "goto","if","in","local","nil","not","or","repeat","return","then",
+      "true","until","while","game","workspace","script","Instance","Vector3",
+      "CFrame","Color3","UDim2","Enum","typeof","pairs","ipairs","next",
+      "pcall","xpcall","type","tostring","tonumber","print","warn","error",
+      "require","rawget","rawset","rawequal","select","unpack","table",
+      "string","math","bit32","coroutine","debug","os","utf8","shared","_G",
+      "tick","time","wait","spawn","delay","task","getfenv","setfenv"
+    ]);
   }
 
   obfuscate(src) {
     src = String(src || "").trim();
     if (!src) return "";
 
-    this._compile(src);
+    if (this.mode === "maximum") {
+      return this._obfuscateVM(src);
+    }
+    return this._obfuscateStandard(src);
+  }
 
-    // 4-layer encryption
+  // =====================================================
+  // STANDARD MODE (No VM) - Simple yet powerful
+  // =====================================================
+
+  _obfuscateStandard(code) {
+    code = this._stripComments(code);
+    code = this._encryptStrings(code);
+    code = this._renameLocals(code);
+    code = this._obfuscateNumbers(code);
+    code = this._insertJunk(code);
+    code = this._wrapControlFlow(code);
+    return this._standardWrapper(code);
+  }
+
+  _stripComments(code) {
+    return code
+      .replace(/--\[\[[\s\S]*?\]\]/g, "")
+      .replace(/--[^\n]*/g, "")
+      .replace(/\n{3,}/g, "\n\n");
+  }
+
+  _encryptStrings(code) {
+    return code.replace(/(["'])(?:\\.|(?!\1).)*?\1/g, (match) => {
+      if (match.length <= 3) return match;
+
+      let content = match.slice(1, -1)
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "\t")
+        .replace(/\\r/g, "\r")
+        .replace(/\\"/g, '"')
+        .replace(/\\'/g, "'")
+        .replace(/\\\\/g, "\\");
+
+      const encrypted = [];
+      for (let i = 0; i < content.length; i++) {
+        const k = this.key[i % this.key.length];
+        encrypted.push(content.charCodeAt(i) ^ k ^ ((i * 13) & 255));
+      }
+
+      return `_S({${encrypted.join(",")}})`;
+    });
+  }
+
+  _renameLocals(code) {
+    const localRegex = /\blocal\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*)*)/g;
+
+    code = code.replace(localRegex, (full, names) => {
+      const newNames = names.split(",").map(n => {
+        n = n.trim();
+        if (this.reserved.has(n)) return n;
+        if (!this.varMap.has(n)) {
+          this.varMap.set(n, this._genName());
+        }
+        return this.varMap.get(n);
+      });
+      return "local " + newNames.join(",");
+    });
+
+    for (const [original, renamed] of this.varMap) {
+      const re = new RegExp(`\\b${this._escape(original)}\\b`, "g");
+      code = code.replace(re, renamed);
+    }
+
+    return code;
+  }
+
+  _obfuscateNumbers(code) {
+    return code.replace(/\b(\d{2,})\b/g, (match, num) => {
+      const n = parseInt(num, 10);
+      if (!Number.isFinite(n) || n < 8 || n > 5000000) return match;
+
+      const variants = [
+        `(${n ^ 0x5A} + ${0x5A})`,
+        `bit32.bxor(${n ^ 0x3C},${0x3C})`,
+        `(${Math.floor(n / 2)}*2${n % 2 === 1 ? "+1" : ""})`,
+        `select(-1,${n},${n})`
+      ];
+
+      return variants[Math.floor(Math.random() * variants.length)];
+    });
+  }
+
+  _insertJunk(code) {
+    const junk = [
+      "local _j=math.random();if _j>2.1 then end",
+      "pcall(function()end)",
+      "do local _t={1,2};_t=nil end",
+      "if false then error('x') end",
+      "local _x=0;for _i=1,2 do _x=_x+_i end",
+      "local function _n()end;_n=nil"
+    ];
+
+    const lines = code.split("\n");
+    const out = [];
+
+    for (const line of lines) {
+      out.push(line);
+      if (line.trim().length > 10 && Math.random() < 0.27) {
+        out.push(junk[Math.floor(Math.random() * junk.length)]);
+      }
+    }
+    return out.join("\n");
+  }
+
+  _wrapControlFlow(code) {
+    return `local _s=0
+while true do
+  if _s==0 then
+${code}
+    _s=1
+  elseif _s==1 then
+    break
+  end
+end`;
+  }
+
+  _standardWrapper(code) {
+    const k = this.key;
+    return `--[[ Velum Standard ]]
+local function _S(t)
+  local k={${k.join(",")}}
+  local r=""
+  for i=1,#t do
+    r=r..string.char(bit32.bxor(t[i],k[(i-1)%#k+1],bit32.band(i*13,255)))
+  end
+  return r
+end
+
+if not game or not game.GetService then return end
+local _ok=pcall(function() return game:GetService("RunService") end)
+if not _ok then return end
+
+${code}
+`;
+  }
+
+  // =====================================================
+  // MAXIMUM MODE (Full VM)
+  // =====================================================
+
+  _obfuscateVM(src) {
+    this.bc = [];
+    this.consts = [];
+    this.map = new Map();
+
+    this._compileVM(src);
+
     let data = this.bc;
     for (let layer = 0; layer < 4; layer++) {
       data = this._encrypt(data, layer);
@@ -29,12 +190,10 @@ class LuauObfuscator {
       typeof c === "string" ? this._encStr(c) : c
     );
 
-    return this._vm(data, encConsts, hash);
+    return this._buildVM(data, encConsts, hash);
   }
 
-  // ====================== COMPILER ======================
-
-  _compile(src) {
+  _compileVM(src) {
     this.bc = [];
     this.consts = [];
     this.map.clear();
@@ -42,22 +201,22 @@ class LuauObfuscator {
     const sIdx = this._const(src);
     const lIdx = this._const("loadstring");
 
-    this._op("NOP");
-    this._op("JUNK");
-    this._op("LOADK", 0, sIdx);
-    this._op("LOADK", 1, lIdx);
-    this._op("GETGLOBAL", 1, 1);
-    this._op("MOVE", 2, 0);
-    this._op("CALL", 1, 1, 2);
-    this._op("JUNK");
-    this._op("JUNK2");
-    this._op("CALL", 1, 0, 0);
-    this._op("RETURN", 0, 1);
+    this._emit("NOP");
+    this._emit("JUNK");
+    this._emit("LOADK", 0, sIdx);
+    this._emit("LOADK", 1, lIdx);
+    this._emit("GETGLOBAL", 1, 1);
+    this._emit("MOVE", 2, 0);
+    this._emit("CALL", 1, 1, 2);
+    this._emit("JUNK");
+    this._emit("JUNK2");
+    this._emit("CALL", 1, 0, 0);
+    this._emit("RETURN", 0, 1);
 
     this._floodJunk();
   }
 
-  _op(name, a = 0, b = 0, c = 0) {
+  _emit(op, a = 0, b = 0, c = 0) {
     const O = {
       NOP: 0x00, MOVE: 0x11, LOADK: 0x22, LOADBOOL: 0x23, LOADNIL: 0x24,
       GETGLOBAL: 0x33, SETGLOBAL: 0x34, GETTABLE: 0x35, SETTABLE: 0x36,
@@ -68,19 +227,15 @@ class LuauObfuscator {
       JUNK: 0xA1, JUNK2: 0xA2, JUNK3: 0xA3, JUNK4: 0xA4,
       TRAP: 0xFE, HALT: 0xFF
     };
-    this.bc.push(O[name] ?? 0x00, a & 255, b & 255, c & 255);
+    this.bc.push(O[op] ?? 0x00, a & 255, b & 255, c & 255);
   }
 
   _floodJunk() {
     const out = [];
     for (let i = 0; i < this.bc.length; i += 4) {
-      if (Math.random() < 0.6) {
+      if (Math.random() < 0.55) {
         const t = ["JUNK", "JUNK2", "JUNK3", "JUNK4", "NOP"][Math.random() * 5 | 0];
         out.push(this._opVal(t), Math.random() * 220 | 0, Math.random() * 220 | 0, Math.random() * 220 | 0);
-      }
-      if (Math.random() < 0.2) {
-        out.push(this._opVal("TEST"), Math.random() * 40 | 0, 0, 0);
-        out.push(this._opVal("JMP"), Math.random() * 4 | 0, 0, 0);
       }
       out.push(this.bc[i], this.bc[i + 1], this.bc[i + 2], this.bc[i + 3]);
     }
@@ -88,7 +243,7 @@ class LuauObfuscator {
   }
 
   _opVal(n) {
-    const m = { NOP: 0x00, JUNK: 0xA1, JUNK2: 0xA2, JUNK3: 0xA3, JUNK4: 0xA4, TEST: 0x6A, JMP: 0x66 };
+    const m = { NOP: 0x00, JUNK: 0xA1, JUNK2: 0xA2, JUNK3: 0xA3, JUNK4: 0xA4 };
     return m[n] || 0;
   }
 
@@ -100,8 +255,6 @@ class LuauObfuscator {
     this.map.set(k, i);
     return i;
   }
-
-  // ====================== ENCRYPTION ======================
 
   _encrypt(data, layer) {
     const out = new Array(data.length);
@@ -145,15 +298,13 @@ class LuauObfuscator {
     return ((x << n) | (x >>> (8 - n))) & 255;
   }
 
-  // ====================== VM ======================
-
-  _vm(encBC, encConsts, expectHash) {
+  _buildVM(encBC, encConsts, expectHash) {
     const k = this.key;
     const cLit = encConsts.map(c =>
       Array.isArray(c) ? `{${c.join(",")}}` : JSON.stringify(c)
     ).join(",");
 
-    return `--[[ Velum Ultimate ]]
+    return `--[[ Velum Maximum ]]
 local _K={${k.join(",")}}
 
 local function _D(t,l)
@@ -210,10 +361,6 @@ local function _chk()
     if not rs then error() end
   end)
   if not ok then return false end
-  if getrawmetatable then
-    local mt=getrawmetatable(game)
-    if mt and rawget(mt,"__namecall") then end
-  end
   return true
 end
 if not _chk() then return end
@@ -273,13 +420,29 @@ _VM()
 `;
   }
 
+  // ====================== UTILS ======================
+
+  _genName() {
+    const pool = ["I", "l", "O", "0", "o"];
+    let name = "_";
+    const len = 4 + (this.counter % 3);
+    for (let i = 0; i < len; i++) {
+      name += pool[Math.floor(Math.random() * pool.length)];
+    }
+    return name + (this.counter++);
+  }
+
   _bytes(n) {
     const a = [];
     for (let i = 0; i < n; i++) a.push(Math.random() * 256 | 0);
     return a;
   }
+
+  _escape(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
 }
 
-// Export for browser & Node
+// Export
 if (typeof window !== "undefined") window.LuauObfuscator = LuauObfuscator;
 if (typeof module !== "undefined" && module.exports) module.exports = LuauObfuscator;
