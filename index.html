@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Velum — Premium Luau Obfuscator</title>
+  <meta name="description" content="Premium high-strength Luau obfuscator with advanced virtual machine protection" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #07080a;
+      --bg-elevated: #0c0e12;
+      --surface: rgba(18, 21, 28, 0.75);
+      --surface-solid: #12151c;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-hover: rgba(255, 255, 255, 0.12);
+      --text: #f0f2f5;
+      --text-secondary: #9ba1ad;
+      --text-muted: #6b7280;
+      --accent: #7c6af7;
+      --accent-soft: rgba(124, 106, 247, 0.15);
+      --accent-glow: rgba(124, 106, 247, 0.35);
+      --success: #34d399;
+      --danger: #f87171;
+      --radius: 14px;
+      --radius-sm: 10px;
+      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(124, 106, 247, 0.12), transparent),
+        radial-gradient(ellipse 60% 40% at 80% 100%, rgba(99, 102, 241, 0.08), transparent);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .app {
+      position: relative;
+      z-index: 1;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 48px 24px 80px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .logo-mark {
+      width: 42px;
+      height: 42px;
+      background: linear-gradient(135deg, #8b7cf8, #6c5ce7);
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 24px var(--accent-glow);
+    }
+
+    .logo-mark svg {
+      width: 22px;
+      height: 22px;
+      color: white;
+    }
+
+    header h1 {
+      font-size: 2.4rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      background: linear-gradient(135deg, #e0e7ff 0%, #a5b4fc 40%, #7c6af7 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    header .subtitle {
+      color: var(--text-secondary);
+      font-size: 1.05rem;
+      margin-top: 8px;
+      font-weight: 400;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 18px;
+      padding: 6px 14px;
+      background: var(--accent-soft);
+      border: 1px solid rgba(124, 106, 247, 0.25);
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: #c4b5fd;
+    }
+
+    .badge span {
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--surface);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 22px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      transition: border-color 0.25s;
+    }
+
+    .card:hover { border-color: var(--border-hover); }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .card-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--mono);
+    }
+
+    .editor-wrap {
+      position: relative;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    textarea {
+      width: 100%;
+      flex: 1;
+      min-height: 320px;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 16px;
+      resize: vertical;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    textarea:focus {
+      border-color: rgba(124, 106, 247, 0.5);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    textarea::placeholder { color: #4b5563; }
+    textarea[readonly] { color: #d1d5db; }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+      align-items: center;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 11px 20px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      font-family: var(--font);
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #8b7cf8, #6c5ce7);
+      color: white;
+      box-shadow: 0 4px 16px rgba(108, 92, 231, 0.35);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 22px rgba(108, 92, 231, 0.45);
+    }
+
+    .btn-primary:active:not(:disabled) { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text);
+      border-color: var(--border-hover);
+    }
+
+    .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+
+    .stats {
+      display: flex;
+      gap: 16px;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+
+    .stat { display: flex; flex-direction: column; gap: 2px; }
+
+    .stat-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .stat-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-family: var(--mono);
+      color: var(--text);
+    }
+
+    .stat-value.accent { color: #a5b4fc; }
+
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface-solid);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-size: 0.875rem;
+      font-weight: 500;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+      opacity: 0;
+      transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      pointer-events: none;
+    }
+
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+    }
+
+    .toast.success {
+      border-color: rgba(52, 211, 153, 0.3);
+      background: linear-gradient(135deg, rgba(52, 211, 153, 0.08), var(--surface-solid));
+    }
+
+    .toast.error { border-color: rgba(248, 113, 113, 0.3); }
+
+    .toast-icon { width: 18px; height: 18px; flex-shrink: 0; }
+
+    .spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(255, 255, 255, 0.25);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    footer {
+      text-align: center;
+      margin-top: 56px;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    footer span { color: var(--text-secondary); }
+
+    @media (max-width: 600px) {
+      .app { padding: 32px 16px 60px; }
+      header h1 { font-size: 1.9rem; }
+      textarea { min-height: 240px; }
+      .controls { flex-direction: column; align-items: stretch; }
+      .btn { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="logo">
+        <div class="logo-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+            <path d="M2 17l10 5 10-5"/>
+            <path d="M2 12l10 5 10-5"/>
+          </svg>
+        </div>
+        <h1>Velum</h1>
+      </div>
+      <p class="subtitle">Premium Luau Obfuscator with Advanced VM Protection</p>
+      <div class="badge">
+        <span></span>
+        Maximum Strength • Multi-layer Encryption
+      </div>
+    </header>
+
+    <div class="workspace">
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Source Script</span>
+          <span class="card-meta" id="inputMeta">0 lines</span>
+        </div>
+        <div class="editor-wrap">
+          <textarea id="input" placeholder="Paste your Luau script here..." spellcheck="false"></textarea>
+        </div>
+        <div class="controls">
+          <button class="btn btn-primary" id="obfuscateBtn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            Obfuscate
+          </button>
+          <button class="btn btn-ghost" id="clearBtn">Clear</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">Protected Output</span>
+          <span class="card-meta" id="outputMeta">—</span>
+        </div>
+        <div class="editor-wrap">
+          <textarea id="output" placeholder="Obfuscated result will appear here..." readonly spellcheck="false"></textarea>
+        </div>
+        <div class="controls">
+          <button class="btn btn-ghost" id="copyBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            Copy
+          </button>
+          <button class="btn btn-ghost" id="downloadBtn" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download
+          </button>
+        </div>
+
+        <div class="stats" id="stats" style="display: none;">
+          <div class="stat">
+            <span class="stat-label">Original</span>
+            <span class="stat-value" id="statOriginal">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Protected</span>
+            <span class="stat-value accent" id="statProtected">—</span>
+          </div>
+          <div class="stat">
+            <span class="stat-label">Ratio</span>
+            <span class="stat-value" id="statRatio">—</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <footer>
+      Velum Obfuscator <span>•</span> Pure JavaScript <span>•</span> Ready for production
+    </footer>
+  </div>
+
+  <div class="toast" id="toast">
+    <svg class="toast-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M22 11.08V12a10 10 0 11-5.93-9.14"/>
+      <polyline points="22 4 12 14.01 9 11.01"/>
+    </svg>
+    <span id="toastMsg">Success</span>
+  </div>
+
+  <script src="obfuscator.js"></script>
+  <script>
+    const input = document.getElementById('input');
+    const output = document.getElementById('output');
+    const inputMeta = document.getElementById('inputMeta');
+    const outputMeta = document.getElementById('outputMeta');
+    const obfuscateBtn = document.getElementById('obfuscateBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const downloadBtn = document.getElementById('downloadBtn');
+    const stats = document.getElementById('stats');
+    const toast = document.getElementById('toast');
+    const toastMsg = document.getElementById('toastMsg');
+
+    const obfuscator = new LuauObfuscator();
+    let toastTimer;
+
+    function showToast(message, type = 'success') {
+      toastMsg.textContent = message;
+      toast.className = 'toast show ' + type;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+    }
+
+    function updateInputMeta() {
+      const lines = input.value ? input.value.split('\n').length : 0;
+      const chars = input.value.length;
+      inputMeta.textContent = lines + ' lines • ' + chars.toLocaleString() + ' chars';
+    }
+
+    input.addEventListener('input', updateInputMeta);
+
+    obfuscateBtn.addEventListener('click', () => {
+      const code = input.value.trim();
+      if (!code) {
+        showToast('Please paste a script first', 'error');
+        return;
+      }
+
+      const originalLen = code.length;
+      obfuscateBtn.disabled = true;
+      obfuscateBtn.innerHTML = '<div class="spinner"></div> Protecting...';
+
+      setTimeout(() => {
+        try {
+          const result = obfuscator.obfuscate(code);
+          output.value = result;
+
+          const protectedLen = result.length;
+          const ratio = (protectedLen / originalLen).toFixed(1) + 'x';
+
+          outputMeta.textContent = result.split('\n').length + ' lines • ' + protectedLen.toLocaleString() + ' chars';
+          document.getElementById('statOriginal').textContent = originalLen.toLocaleString();
+          document.getElementById('statProtected').textContent = protectedLen.toLocaleString();
+          document.getElementById('statRatio').textContent = ratio;
+          stats.style.display = 'flex';
+
+          copyBtn.disabled = false;
+          downloadBtn.disabled = false;
+          showToast('Script protected successfully');
+        } catch (err) {
+          console.error(err);
+          showToast('Obfuscation failed', 'error');
+          output.value = '';
+          outputMeta.textContent = '—';
+          stats.style.display = 'none';
+          copyBtn.disabled = true;
+          downloadBtn.disabled = true;
+        } finally {
+          obfuscateBtn.disabled = false;
+          obfuscateBtn.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            Obfuscate
+          `;
+        }
+      }, 40);
+    });
+
+    clearBtn.addEventListener('click', () => {
+      input.value = '';
+      output.value = '';
+      inputMeta.textContent = '0 lines';
+      outputMeta.textContent = '—';
+      stats.style.display = 'none';
+      copyBtn.disabled = true;
+      downloadBtn.disabled = true;
+      input.focus();
+    });
+
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(output.value);
+        showToast('Copied to clipboard');
+      } catch {
+        output.select();
+        document.execCommand('copy');
+        showToast('Copied to clipboard');
+      }
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      const blob = new Blob([output.value], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'velum-protected.lua';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('Download started');
+    });
+
+    updateInputMeta();
+  </script>
+</body>
+</html>
